@@ -4,6 +4,8 @@ import nibabel as nib
 import numpy as np
 from nilearn import masking, datasets, plotting
 from nipy.labs.statistical_mapping import get_3d_peaks
+import multiprocessing
+from joblib import Parallel, delayed
 
 from tools import pickle_dump, pickle_load
 
@@ -51,12 +53,11 @@ def extract(dir_path, filename, threshold=0., load=True):
     dir_list = [x[0] for x in os.walk(dir_path)]
     dir_list.remove(dir_path)
 
-    n_tot = len(dir_list)
-    for pid, dir in enumerate(dir_list):
-        print(f'Computing activations of map {pid+1} out of {n_tot}.')
-        XYZ = get_activations(f'{dir}/{filename}', threshold)
+    def extract_pool(directory):
+        print(f'Extracting {directory}...')
+        XYZ = get_activations(f'{directory}/{filename}', threshold)
         if not XYZ is None:
-            ds_dict[pid] = {
+            return {
                 'contrasts': {
                     '0': {
                         'coords':
@@ -70,7 +71,12 @@ def extract(dir_path, filename, threshold=0., load=True):
                     }
                 }
             }
-        # break
+        return None
+
+    n_jobs = multiprocessing.cpu_count()-1
+    res = Parallel(n_jobs=n_jobs, backend='threading')(delayed(extract_pool)(dir) for dir in dir_list)
+
+    ds_dict = {k: v for k, v in enumerate(res)}
 
     pickle_dump(ds_dict, save_dir+tag)
     return ds_dict
