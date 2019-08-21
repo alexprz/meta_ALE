@@ -51,7 +51,10 @@ def extract(dir_path, filename, threshold=0., load=True):
     ds_dict = {}
 
     dir_list = [x[0] for x in os.walk(dir_path)]
-    dir_list.remove(dir_path)
+    try:
+        dir_list.remove(dir_path)
+    except ValueError:
+        pass
 
     def extract_pool(directory):
         print(f'Extracting {directory}...')
