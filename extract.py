@@ -1,8 +1,7 @@
 import os
-import nilearn
 import nibabel as nib
 import numpy as np
-from nilearn import masking, datasets, plotting
+from nilearn import masking, datasets, plotting, image
 from nipy.labs.statistical_mapping import get_3d_peaks
 import multiprocessing
 from joblib import Parallel, delayed
@@ -10,6 +9,10 @@ from joblib import Parallel, delayed
 from tools import pickle_dump, pickle_load
 
 save_dir = 'save/'
+
+template = datasets.load_mni152_template()
+gray_mask = masking.compute_gray_matter_mask(template)
+
 
 def get_sub_dict(X, Y, Z):
     '''
@@ -59,15 +62,18 @@ def get_activations(filepath, threshold):
     try:
         img = nilearn.image.load_img(filepath)
     except ValueError:  # File path not found
+        print(f'File {filepath} not found.')
         return None
 
+    img = image.resample_to_img(img, template)
     abs_img = nib.Nifti1Image(np.absolute(img.get_data()), img.affine)
     del img
+
     abs_data = abs_img.get_data()
     threshold = np.percentile(abs_data[abs_data > 0], threshold)
     del abs_data
 
-    peaks = get_3d_peaks(abs_img, threshold=threshold)
+    peaks = get_3d_peaks(abs_img, mask=gray_mask)
 
     for peak in peaks:
         X.append(peak['pos'][0])
