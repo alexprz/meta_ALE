@@ -62,8 +62,10 @@ def get_activations(filepath, threshold):
         return None
 
     abs_img = nib.Nifti1Image(np.absolute(img.get_data()), img.affine)
+    del img
     abs_data = abs_img.get_data()
     threshold = np.percentile(abs_data[abs_data > 0], threshold)
+    del abs_data
 
     peaks = get_3d_peaks(abs_img, threshold=threshold)
 
@@ -72,6 +74,8 @@ def get_activations(filepath, threshold):
         Y.append(peak['pos'][1])
         Z.append(peak['pos'][2])
 
+
+    del peaks
     return X, Y, Z
 
 def extract(dir_path, filename, threshold=0., load=True):
@@ -102,7 +106,7 @@ def extract(dir_path, filename, threshold=0., load=True):
     ds_dict = {}
 
     # List of folders contained in dir_path folder
-    dir_list = [x[0] for x in os.walk(dir_path)]
+    dir_list = [f'{dir_path}{dir}' for dir in next(os.walk(dir_path))[1]]
     try:
         # On some OS the root dict is also in the list, must be removed
         dir_list.remove(dir_path)
