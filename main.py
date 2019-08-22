@@ -22,7 +22,7 @@ if __name__ == '__main__':
     hyp_file = 'hypo1_unthresh.nii.gz'  # Hypothesis name
 
     # Extracting coordinates from data
-    ds_dict = extract.extract(data_dir, hyp_file, threshold=.95, load=True)
+    ds_dict = extract.extract(data_dir, hyp_file, threshold=.95, load=False)
 
     # Performing ALE
     ds = nimare.dataset.Dataset(ds_dict)
@@ -44,16 +44,20 @@ if __name__ == '__main__':
 
     arr_ale_thresholded = copy.copy(arr_ale)
     arr_z_thresholded = copy.copy(arr_z)
+    arr_p_thresholded = copy.copy(arr_p)
 
     arr_ale_thresholded[arr_p > fdr] = 0
     arr_z_thresholded[arr_p > fdr] = 0
+    arr_p_thresholded[arr_p > fdr] = 0
 
     img_ale_thresholded = nib.Nifti1Image(arr_ale_thresholded, img_ale.affine)
     img_z_thresholded = nib.Nifti1Image(arr_z_thresholded, img_z.affine)
+    img_p_thresholded = nib.Nifti1Image(arr_p_thresholded, img_p.affine)
 
     plotting.plot_stat_map(img_ale, title='ALE')
     plotting.plot_stat_map(img_p, title='p')
     plotting.plot_stat_map(img_z, title='z')
-    plotting.plot_stat_map(img_ale_thresholded, title='ale thresholded')
+    plotting.plot_stat_map(img_ale_thresholded, title='ALE thresholded')
     plotting.plot_stat_map(img_z_thresholded, title='z thresholded')
+    plotting.plot_stat_map(img_p_thresholded, title='p thresholded')
     plt.show()

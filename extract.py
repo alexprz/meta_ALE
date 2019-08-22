@@ -1,6 +1,7 @@
 import os
 import nibabel as nib
 import numpy as np
+import nilearn
 from nilearn import masking, datasets, plotting, image
 from nipy.labs.statistical_mapping import get_3d_peaks
 import multiprocessing
@@ -62,18 +63,17 @@ def get_activations(filepath, threshold):
     try:
         img = nilearn.image.load_img(filepath)
     except ValueError:  # File path not found
-        print(f'File {filepath} not found.')
+        print(f'File {filepath} not found. Ignored.')
+        return None
+
+    if np.isnan(img.get_fdata()).any():
+        print(f'File {filepath} contains Nan. Ignored.')
         return None
 
     img = image.resample_to_img(img, template)
-    abs_img = nib.Nifti1Image(np.absolute(img.get_data()), img.affine)
-    del img
+    threshold = 1.96
 
-    abs_data = abs_img.get_data()
-    threshold = np.percentile(abs_data[abs_data > 0], threshold)
-    del abs_data
-
-    peaks = get_3d_peaks(abs_img, mask=gray_mask)
+    peaks = get_3d_peaks(img, mask=gray_mask, threshold=threshold)
 
     for peak in peaks:
         X.append(peak['pos'][0])
