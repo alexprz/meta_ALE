@@ -1,3 +1,4 @@
 data-narps
 venv
 __pycache__
+.env
