@@ -122,6 +122,8 @@ def extract(dir_path, filename, threshold=0., load=True):
     n_jobs = multiprocessing.cpu_count()
     res = Parallel(n_jobs=n_jobs, backend='threading')(delayed(extract_pool)(dir) for dir in dir_list)
 
+    # Removing potential None values
+    res = list(filter(None, res))
     # Merging all dictionaries
     ds_dict = {k: v for k, v in enumerate(res)}
 
