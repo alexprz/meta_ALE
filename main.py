@@ -17,47 +17,51 @@ else:
     matplotlib.use('TkAgg')
 
 
+def run_ALE(ds_dict):
+    """Extract and run ALE on specified data."""
+    # Performing ALE
+    ds = nimare.dataset.Dataset(ds_dict)
+    ALE = nimare.meta.cbma.ale.ALE()
+    res = ALE.fit(ds)
+
+    img_ale = res.get_map('ale')
+    img_p = res.get_map('p')
+    img_z = res.get_map('z')
+
+    return img_ale, img_p, img_z
+
+
+def FDR_threshold(img_list, img_p, q=0.05):
+    """Compute FDR and threshold same-sized images."""
+    arr_list = [copy.copy(img.get_fdata()) for img in img_list]
+    arr_p = img_p.get_fdata()
+    aff = img_p.affine
+
+    fdr = nimare.stats.fdr(arr_p.ravel(), q=q)
+
+    for arr in arr_list:
+        arr[arr_p > fdr] = 0
+
+    res_list = [nib.Nifti1Image(arr, aff) for arr in arr_list]
+
+    return res_list
+
+
 if __name__ == '__main__':
     # Folder and file names
     data_dir = 'data-narps/orig/'  # Data folder
     hyp_file = 'hypo1_unthresh.nii.gz'  # Hypothesis name
 
     # Extracting coordinates from data
-    ds_dict = extract.extract(data_dir, hyp_file, threshold=.95, load=False)
+    ds_dict = extract.extract(data_dir, hyp_file, threshold=1.96, load=True)
 
-    # Performing ALE
-    ds = nimare.dataset.Dataset(ds_dict)
-    ALE = nimare.meta.cbma.ale.ALE()
-    res = ALE.fit(ds)
-
-    # Plotting results of meta analysis
-    img_ale = res.get_map('ale')
-    img_p = res.get_map('p')
-    img_z = res.get_map('z')
-
-    arr_ale = img_ale.get_fdata()
-    arr_p = img_p.get_fdata()
-    arr_z = img_z.get_fdata()
-
-    fdr = nimare.stats.fdr(arr_p.ravel(), q=0.05)
-    print(f'FDR : {fdr}')
-
-    arr_ale_thresholded = copy.copy(arr_ale)
-    arr_z_thresholded = copy.copy(arr_z)
-    arr_p_thresholded = copy.copy(arr_p)
-
-    arr_ale_thresholded[arr_p > fdr] = 0
-    arr_z_thresholded[arr_p > fdr] = 0
-    arr_p_thresholded[arr_p > fdr] = 0
-
-    img_ale_thresholded = nib.Nifti1Image(arr_ale_thresholded, img_ale.affine)
-    img_z_thresholded = nib.Nifti1Image(arr_z_thresholded, img_z.affine)
-    img_p_thresholded = nib.Nifti1Image(arr_p_thresholded, img_p.affine)
+    img_ale, img_p, img_z = run_ALE(ds_dict)
+    img_ale_t, img_p_t, img_z_t = FDR_threshold([img_ale, img_p, img_z], img_p)
 
     plotting.plot_stat_map(img_ale, title='ALE')
     plotting.plot_stat_map(img_p, title='p')
     plotting.plot_stat_map(img_z, title='z')
-    plotting.plot_stat_map(img_ale_thresholded, title='ALE thresholded')
-    plotting.plot_stat_map(img_z_thresholded, title='z thresholded')
-    plotting.plot_stat_map(img_p_thresholded, title='p thresholded')
+    plotting.plot_stat_map(img_ale_t, title='ALE thresholded')
+    plotting.plot_stat_map(img_z_t, title='z thresholded')
+    plotting.plot_stat_map(img_p_t, title='p thresholded')
     plt.show()
