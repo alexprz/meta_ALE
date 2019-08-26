@@ -1,3 +1,4 @@
+"""Perform data extraction, run ALE and plot results."""
 import extract
 import nimare
 import matplotlib
@@ -28,7 +29,6 @@ if __name__ == '__main__':
     ds = nimare.dataset.Dataset(ds_dict)
     ALE = nimare.meta.cbma.ale.ALE()
     res = ALE.fit(ds)
-
 
     # Plotting results of meta analysis
     img_ale = res.get_map('ale')
