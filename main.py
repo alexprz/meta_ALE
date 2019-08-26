@@ -31,7 +31,7 @@ def run_ALE(ds_dict):
     return img_ale, img_p, img_z
 
 
-def FDR_threshold(img_list, img_p, q=0.05):
+def fdr_threshold(img_list, img_p, q=0.05):
     """Compute FDR and threshold same-sized images."""
     arr_list = [copy.copy(img.get_fdata()) for img in img_list]
     arr_p = img_p.get_fdata()
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     ds_dict = extract.extract(data_dir, hyp_file, threshold=1.96, load=True)
 
     img_ale, img_p, img_z = run_ALE(ds_dict)
-    img_ale_t, img_p_t, img_z_t = FDR_threshold([img_ale, img_p, img_z], img_p)
+    img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
 
     plotting.plot_stat_map(img_ale, title='ALE')
     plotting.plot_stat_map(img_p, title='p')
