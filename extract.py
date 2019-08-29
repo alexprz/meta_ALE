@@ -15,14 +15,13 @@ template = datasets.load_mni152_template()
 gray_mask = masking.compute_gray_matter_mask(template)
 
 
-def get_sub_dict(X, Y, Z):
+def get_sub_dict(XYZ, path):
     """
     Build sub dictionnary of a study using the nimare structure.
 
     Args:
-        X (list): Store the X coordinates
-        Y (list): Store the Y coordinates
-        Z (list): Store the Z coordinates
+        XYZ (tuple): Size 3 tuple of list storing the X Y Z coordinates.
+        path (string): Absolute path to the full image.
 
     Returns:
         (dict): Dictionary storing the coordinates for a
@@ -32,14 +31,16 @@ def get_sub_dict(X, Y, Z):
     return {
         'contrasts': {
             '0': {
-                'coords':
-                    {
-                        'x': X,
-                        'y': Y,
-                        'z': Z,
-                        'space': 'MNI'
+                'coords': {
+                    'x': XYZ[0],
+                    'y': XYZ[1],
+                    'z': XYZ[2],
+                    'space': 'MNI'
                     },
-                'sample_sizes': 50
+                'sample_sizes': 50,
+                'images': {
+                    '0': path
+                    }
             }
         }
     }
@@ -75,6 +76,9 @@ def get_activations(filepath, threshold):
 
     peaks = get_3d_peaks(img, mask=gray_mask, threshold=threshold)
 
+    if not peaks:
+        return X, Y, Z
+
     for peak in peaks:
         X.append(peak['pos'][0])
         Y.append(peak['pos'][1])
@@ -84,64 +88,17 @@ def get_activations(filepath, threshold):
     return X, Y, Z
 
 
-def retrieve_imgs(dir_path, filename):
-    """
-    Return a list of path to images.
-
-    Args:
-        dir_path (str): Path to the folder containing the studies folders
-        filename (str): Name of the image to look for inside each study folder
-
-    Returns:
-        (list): List of paths (string) to the found images.
-
-    """
-    # List of folders contained in dir_path folder
-    Dir = [f'{dir_path}{dir}' for dir in next(os.walk(dir_path))[1]]
-    try:
-        # On some OS the root dict is also in the list, must be removed
-        Dir.remove(dir_path)
-    except ValueError:
-        pass
-
-    return [f'{dir}/{filename}' for dir in Dir]
-
-
-def extract(dir_path, filename, threshold=1.96, load=True):
-    """
-    Extract coordinates from found images.
-
-    Extracts coordinates from found images and put it in a
-        dictionnary using Nimare structure. See retrieve_imgs
-        and extract_from_paths doc for aguments.
-
-    Args:
-        dir_path (str): See retrieve_imgs doc.
-        filename (str): See retrieve_imgs doc.
-        threshold (float): See extract_from_paths doc.
-        load (bool): If True, try to load a previously dumped dict if any.
-            If not or False, compute a new one.
-
-    Returns:
-        (dict): Dictionnary storing the coordinates using the Nimare
-            structure.
-
-    """
-    Path = retrieve_imgs(dir_path, filename)
-    tag = f'{filename}-thr-{threshold}' if load else None
-    return extract_from_paths(Path, threshold=threshold, tag=tag, load=load)
-
-
 def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
     """
-    Extract coordinates from given images.
+    Extract data from given images.
 
-    Extracts coordinates from the data and put it in a
+    Extracts data (coordinates, paths...) from the data and put it in a
         dictionnary using Nimare structure.
 
     Args:
-        Path (list): List of paths (string) or images (Nifti1Image).
-        threshold (float): value below threshold are ignored.
+        Path (list): List of absolute paths (string).
+        threshold (float): value below threshold are ignored. Used for
+            peak detection.
         tag (str): Name of the file to load/dump.
         load (bool): If True, load a potential existing result.
             If False or not found, compute again.
@@ -161,9 +118,11 @@ def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
     def extract_pool(path):
         """Extract activation for multiprocessing."""
         print(f'Extracting {path}...')
-        XYZ = get_activations(f'{path}', threshold)
+        XYZ = get_activations(path, threshold)
+
         if XYZ is not None:
-            return get_sub_dict(XYZ[0], XYZ[1], XYZ[2])
+            print(f'N peaks : {len(XYZ[0])}.')
+            return get_sub_dict(XYZ, path)
         return None
 
     n_jobs = multiprocessing.cpu_count()
