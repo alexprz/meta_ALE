@@ -6,6 +6,7 @@ from nilearn import masking, datasets, image
 from nipy.labs.statistical_mapping import get_3d_peaks
 import multiprocessing
 from joblib import Parallel, delayed
+import ntpath
 
 from tools import pickle_dump, pickle_load
 
@@ -28,22 +29,27 @@ def get_sub_dict(XYZ, path):
             single study using the Nimare structure.
 
     """
-    return {
+    d = {
         'contrasts': {
-            '0': {
-                'coords': {
+            '0': {}
+        }
+    }
+
+    if XYZ is not None:
+        d['contrasts']['0']['coords'] = {
                     'x': XYZ[0],
                     'y': XYZ[1],
                     'z': XYZ[2],
                     'space': 'MNI'
-                    },
-                'sample_sizes': 50,
-                'images': {
-                    '0': path
                     }
-            }
+        d['contrasts']['0']['sample_sizes'] = 50
+
+    if path is not None:
+        d['contrasts']['0']['images'] = {
+            'con': path
         }
-    }
+
+    return d
 
 
 def get_activations(filepath, threshold):
@@ -88,7 +94,7 @@ def get_activations(filepath, threshold):
     return X, Y, Z
 
 
-def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
+def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, load=True):
     """
     Extract data from given images.
 
@@ -97,6 +103,7 @@ def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
 
     Args:
         Path (list): List of absolute paths (string).
+        data (list): Data to extract. 'coord' and 'path' available.
         threshold (float): value below threshold are ignored. Used for
             peak detection.
         tag (str): Name of the file to load/dump.
@@ -118,12 +125,20 @@ def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
     def extract_pool(path):
         """Extract activation for multiprocessing."""
         print(f'Extracting {path}...')
-        XYZ = get_activations(path, threshold)
+
+        XYZ = None
+        if 'coord' in data:
+            XYZ = get_activations(path, threshold)
+            if XYZ is None:
+                return
+
+        if 'path' in data:
+            return get_sub_dict(XYZ, path)
 
         if XYZ is not None:
-            print(f'N peaks : {len(XYZ[0])}.')
-            return get_sub_dict(XYZ, path)
-        return None
+            return get_sub_dict(XYZ, None)
+
+        return
 
     n_jobs = multiprocessing.cpu_count()
     res = Parallel(n_jobs=n_jobs, backend='threading')(
@@ -137,3 +152,32 @@ def extract_from_paths(Path, threshold=1.96, tag=None, load=True):
     if tag is not None:
         pickle_dump(ds_dict, save_dir+tag)  # Dumping
     return ds_dict
+
+
+def process(Path, suffix='_resampled'):
+    """
+    Process images to resample them into MNI template.
+
+    Args:
+        Path (list): List of paths (string) of images.
+        suffix (string): Suffix added to the original file. Note that the
+            output file is stored in the same dir as the input one.
+
+    """
+    for path in Path:
+        try:
+            img = nilearn.image.load_img(path)
+        except ValueError:  # File path not found
+            print(f'File {path} not found. Ignored.')
+            continue
+
+        if np.isnan(img.get_fdata()).any():
+            print(f'File {path} contains Nan. Ignored.')
+            continue
+
+        img = image.resample_to_img(img, template)
+        base, filename = ntpath.split(path)
+        file, ext = filename.split('.', 1)
+
+        print(f'Resampling {path}...')
+        img.to_filename(f'{base}/{file}{suffix}.{ext}')
