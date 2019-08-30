@@ -1,5 +1,6 @@
 """Contain function for extracting coordinates from folders."""
 import os
+import shutil
 import numpy as np
 import nilearn
 from nilearn import masking, datasets, image
@@ -7,6 +8,9 @@ from nipy.labs.statistical_mapping import get_3d_peaks
 import multiprocessing
 from joblib import Parallel, delayed
 import ntpath
+import nibabel as nib
+import re
+import scipy
 
 from tools import pickle_dump, pickle_load
 
@@ -52,12 +56,12 @@ def get_sub_dict(XYZ, path):
     return d
 
 
-def get_activations(filepath, threshold):
+def get_activations(img, threshold):
     """
     Retrieve the xyz activation coordinates from an image.
 
     Args:
-        filepath (stirng or Nifti1Image): Path to or object of a
+        img (string or Nifti1Image): Path to or object of a
             nibabel.Nifti1Image from which to extract coordinates.
         threshold (float): Same as the extract_from_paths function.
 
@@ -69,13 +73,13 @@ def get_activations(filepath, threshold):
     X, Y, Z = [], [], []
 
     try:
-        img = nilearn.image.load_img(filepath)
+        img = nilearn.image.load_img(img)
     except ValueError:  # File path not found
-        print(f'File {filepath} not found. Ignored.')
+        print(f'File {img} not found. Ignored.')
         return None
 
     if np.isnan(img.get_fdata()).any():
-        print(f'File {filepath} contains Nan. Ignored.')
+        print(f'Img {img} contains Nan. Ignored.')
         return None
 
     img = image.resample_to_img(img, template)
@@ -94,7 +98,8 @@ def get_activations(filepath, threshold):
     return X, Y, Z
 
 
-def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, load=True):
+def extract_from_paths(path_dict, data=['coord', 'path'],
+                       threshold=1.96, tag=None, load=True):
     """
     Extract data from given images.
 
@@ -102,7 +107,8 @@ def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, l
         dictionnary using Nimare structure.
 
     Args:
-        Path (list): List of absolute paths (string).
+        path_dict (dict): Dict which keys are study names and values
+            absolute paths (string).
         data (list): Data to extract. 'coord' and 'path' available.
         threshold (float): value below threshold are ignored. Used for
             peak detection.
@@ -122,18 +128,18 @@ def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, l
             return ds_dict
 
     # Computing a new dataset dictionary
-    def extract_pool(path):
+    def extract_pool(name, path):
         """Extract activation for multiprocessing."""
         print(f'Extracting {path}...')
 
         XYZ = None
         if 'coord' in data:
-            XYZ = get_activations(path, threshold)
+            XYZ, img = get_activations(path, threshold)
             if XYZ is None:
                 return
 
         if 'path' in data:
-            return get_sub_dict(XYZ, path)
+            return get_sub_dict(XYZ, img)
 
         if XYZ is not None:
             return get_sub_dict(XYZ, None)
@@ -142,7 +148,7 @@ def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, l
 
     n_jobs = multiprocessing.cpu_count()
     res = Parallel(n_jobs=n_jobs, backend='threading')(
-        delayed(extract_pool)(path) for path in Path)
+        delayed(extract_pool)(name, path) for name, path in path_dict.items())
 
     # Removing potential None values
     res = list(filter(None, res))
@@ -154,30 +160,125 @@ def extract_from_paths(Path, data=['coord', 'path'], threshold=1.96, tag=None, l
     return ds_dict
 
 
-def process(Path, suffix='_resampled'):
+# def process(Path, suffix='_resampled'):
+#     """
+#     Process images to resample them into MNI template.
+
+#     Args:
+#         Path (list): List of paths (string) of images.
+#         suffix (string): Suffix added to the original file. Note that the
+#             output file is stored in the same dir as the input one.
+
+#     """
+#     for path in Path:
+#         try:
+#             img = nilearn.image.load_img(path)
+#         except ValueError:  # File path not found
+#             print(f'File {path} not found. Ignored.')
+#             continue
+
+#         if np.isnan(img.get_fdata()).any():
+#             print(f'File {path} contains Nan. Ignored.')
+#             continue
+
+#         img = image.resample_to_img(img, template)
+#         var = nib.Nifti1Image(img.get_fdata(), img.affine)
+
+#         base, filename = ntpath.split(path)
+#         file, ext = filename.split('.', 1)
+
+#         print(f'Resampling {path}...')
+#         img.to_filename(f'{base}/{file}{suffix}.{ext}')
+#         var.to_filename(f'{base}/{file}_var.{ext}')
+
+def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
     """
-    Process images to resample them into MNI template.
+    Process data by simulating subjects from studies' avg contrasts.
 
     Args:
-        Path (list): List of paths (string) of images.
-        suffix (string): Suffix added to the original file. Note that the
-            output file is stored in the same dir as the input one.
+        studies (dict): Dict with studies' alphanum names as keys and
+            absolute path to avg contrast as values.
+        o_dir (string): Path to output directory in which to store
+            processed data.
+        n_sub (int): Number of subjects to simulate.
+        s1 (float): Standard deviation of the gaussian noise.
+        s2 (float): Standard deviation of the gaussian kernel.
+        rmdir (bool, optional): Whether to delete existing output directory
+            before writing process data.
+        ignore_if_exist (bool, optional): Whether to ignore this process
+            if the output directory exists.
 
     """
-    for path in Path:
+    if ignore_if_exist and os.path.exists(o_dir):
+        print(f'Dir {o_dir} exists. Process ignored.')
+        return
+
+    if rmdir and os.path.exists(o_dir):
+        shutil.rmtree(o_dir)
+
+    o_dir = os.path.join(o_dir, '')  # Adds trailing slash if not already
+
+    # for study_name, path in studies.items():
+    def process_pool(study_name, path):
+        print(f'Processing {study_name}...')
         try:
             img = nilearn.image.load_img(path)
         except ValueError:  # File path not found
             print(f'File {path} not found. Ignored.')
-            continue
+            return
 
         if np.isnan(img.get_fdata()).any():
-            print(f'File {path} contains Nan. Ignored.')
-            continue
+            print(f'Image {path} contains Nan. Ignored.')
+            return
 
-        img = image.resample_to_img(img, template)
-        base, filename = ntpath.split(path)
+        if not re.match(r'^\w+$', study_name):
+            raise ValueError('Study {study_name} contains invalid caracters.')
+        o_study_path = f'{o_dir}{study_name}/'
+        os.makedirs(o_study_path, exist_ok=True)
+
+        _, filename = ntpath.split(path)
         file, ext = filename.split('.', 1)
 
-        print(f'Resampling {path}...')
-        img.to_filename(f'{base}/{file}{suffix}.{ext}')
+        img = image.resample_to_img(img, template)
+        img.to_filename(f'{o_study_path}{filename}')
+
+        sub_imgs = []
+        for i in range(1, n_sub+1):
+            print(f'Simulating subject {i}...', end='\r')
+            sub_img = sim_sub(img, s1, s2)
+            sub_dir = f'{o_study_path}sub-{str(i).zfill(len(str(n_sub)))}/'
+            os.makedirs(sub_dir, exist_ok=True)
+            sub_img.to_filename(f'{sub_dir}{filename}')
+            sub_imgs.append(sub_img)
+
+        std_img = nilearn.image.math_img('np.std(imgs, axis=3)', imgs=sub_imgs)
+        std_img.to_filename(f'{o_study_path}{file}_se.{ext}')
+
+    n_jobs = multiprocessing.cpu_count()
+    Parallel(n_jobs=n_jobs, backend='threading')(
+        delayed(process_pool)(name, path) for name, path in studies.items())
+
+
+def sim_sub(img, s1, s2):
+    """
+    Simulate a subject's contrast from an average map.
+
+    Generate random gaussian noise of the shape of the given image, convolve
+    this noise with a gaussian kernel and add the result to the given image.
+
+    Args:
+        img (nibabel.Nifti1Image): Base image.
+        s1 (float): Standard deviation of the gaussian noise.
+        s2 (float): Standard deviation of the gaussian kernel applied to the
+            generated noise.
+
+    Returns:
+        (nibabel.Nifti1Image): Noised image.
+
+    """
+    data = img.get_fdata()
+    noise = np.random.normal(scale=s1, size=data.shape)
+    noise = scipy.ndimage.gaussian_filter(noise, s2)
+    noise = np.ma.masked_array(noise, np.logical_not(gray_mask.get_fdata()))
+
+    return nib.Nifti1Image(data+noise, img.affine)
