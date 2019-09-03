@@ -5,3 +5,5 @@ nipy
 *_cache*
 *cache_*
 .*
+brain_mapping
+save

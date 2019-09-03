@@ -20,13 +20,14 @@ template = datasets.load_mni152_template()
 gray_mask = masking.compute_gray_matter_mask(template)
 
 
-def get_sub_dict(XYZ, path):
+def get_sub_dict(XYZ, path_dict):
     """
     Build sub dictionnary of a study using the nimare structure.
 
     Args:
         XYZ (tuple): Size 3 tuple of list storing the X Y Z coordinates.
-        path (string): Absolute path to the full image.
+        path_dict (dict): Dict which has map name ('t', 'z', 'con', 'se')
+            as keys and absolute path to the image as values.
 
     Returns:
         (dict): Dictionary storing the coordinates for a
@@ -35,7 +36,9 @@ def get_sub_dict(XYZ, path):
     """
     d = {
         'contrasts': {
-            '0': {}
+            '0': {
+                'metadata': {'sample_sizes': 119}
+            }
         }
     }
 
@@ -46,22 +49,20 @@ def get_sub_dict(XYZ, path):
                     'z': XYZ[2],
                     'space': 'MNI'
                     }
-        d['contrasts']['0']['sample_sizes'] = 50
+        d['contrasts']['0']['sample_sizes'] = 119
 
-    if path is not None:
-        d['contrasts']['0']['images'] = {
-            'con': path
-        }
+    if path_dict is not None:
+        d['contrasts']['0']['images'] = path_dict
 
     return d
 
 
-def get_activations(img, threshold):
+def get_activations(path, threshold):
     """
     Retrieve the xyz activation coordinates from an image.
 
     Args:
-        img (string or Nifti1Image): Path to or object of a
+        path (string or Nifti1Image): Path to or object of a
             nibabel.Nifti1Image from which to extract coordinates.
         threshold (float): Same as the extract_from_paths function.
 
@@ -73,13 +74,13 @@ def get_activations(img, threshold):
     X, Y, Z = [], [], []
 
     try:
-        img = nilearn.image.load_img(img)
+        img = nilearn.image.load_img(path)
     except ValueError:  # File path not found
-        print(f'File {img} not found. Ignored.')
+        print(f'File {path} not found. Ignored.')
         return None
 
     if np.isnan(img.get_fdata()).any():
-        print(f'Img {img} contains Nan. Ignored.')
+        print(f'Img {path} contains Nan. Ignored.')
         return None
 
     img = image.resample_to_img(img, template)
@@ -134,12 +135,21 @@ def extract_from_paths(path_dict, data=['coord', 'path'],
 
         XYZ = None
         if 'coord' in data:
-            XYZ, img = get_activations(path, threshold)
+            XYZ = get_activations(path, threshold)
             if XYZ is None:
                 return
 
         if 'path' in data:
-            return get_sub_dict(XYZ, img)
+            base, filename = ntpath.split(path)
+            file, ext = filename.split('.', 1)
+
+            path_dict = {'z': path}
+            for map_type in ['t', 'con', 'se']:
+                file_path = f'{base}/{file}_{map_type}.{ext}'
+                if os.path.isfile(file_path):
+                    path_dict[map_type] = file_path
+
+            return get_sub_dict(XYZ, path_dict)
 
         if XYZ is not None:
             return get_sub_dict(XYZ, None)
@@ -191,13 +201,14 @@ def extract_from_paths(path_dict, data=['coord', 'path'],
 #         img.to_filename(f'{base}/{file}{suffix}.{ext}')
 #         var.to_filename(f'{base}/{file}_var.{ext}')
 
-def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
+def process(studies, o_dir, n_sub, s1, s2, rmdir=False,
+            ignore_if_exist=False, random_state=None):
     """
     Process data by simulating subjects from studies' avg contrasts.
 
     Args:
         studies (dict): Dict with studies' alphanum names as keys and
-            absolute path to avg contrast as values.
+            absolute path to studies' folder as values.
         o_dir (string): Path to output directory in which to store
             processed data.
         n_sub (int): Number of subjects to simulate.
@@ -209,6 +220,7 @@ def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
             if the output directory exists.
 
     """
+    np.random.seed(random_state)
     if ignore_if_exist and os.path.exists(o_dir):
         print(f'Dir {o_dir} exists. Process ignored.')
         return
@@ -222,12 +234,12 @@ def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
     def process_pool(study_name, path):
         print(f'Processing {study_name}...')
         try:
-            img = nilearn.image.load_img(path)
+            z_img = nilearn.image.load_img(path)
         except ValueError:  # File path not found
             print(f'File {path} not found. Ignored.')
             return
 
-        if np.isnan(img.get_fdata()).any():
+        if np.isnan(z_img.get_fdata()).any():
             print(f'Image {path} contains Nan. Ignored.')
             return
 
@@ -239,13 +251,13 @@ def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
         _, filename = ntpath.split(path)
         file, ext = filename.split('.', 1)
 
-        img = image.resample_to_img(img, template)
-        img.to_filename(f'{o_study_path}{filename}')
+        z_img = image.resample_to_img(z_img, template)
+        z_img.to_filename(f'{o_study_path}{file}.{ext}')
 
         sub_imgs = []
         for i in range(1, n_sub+1):
             print(f'Simulating subject {i}...', end='\r')
-            sub_img = sim_sub(img, s1, s2)
+            sub_img = sim_sub(z_img, s1, s2)
             sub_dir = f'{o_study_path}sub-{str(i).zfill(len(str(n_sub)))}/'
             os.makedirs(sub_dir, exist_ok=True)
             sub_img.to_filename(f'{sub_dir}{filename}')
@@ -254,9 +266,13 @@ def process(studies, o_dir, n_sub, s1, s2, rmdir=False, ignore_if_exist=False):
         std_img = nilearn.image.math_img('np.std(imgs, axis=3)', imgs=sub_imgs)
         std_img.to_filename(f'{o_study_path}{file}_se.{ext}')
 
+        con_img = nilearn.image.math_img('np.multiply(img1, img2)',
+                                         img1=z_img, img2=std_img)
+        con_img.to_filename(f'{o_study_path}{file}_con.{ext}')
+
     n_jobs = multiprocessing.cpu_count()
-    Parallel(n_jobs=n_jobs, backend='threading')(
-        delayed(process_pool)(name, path) for name, path in studies.items())
+    Parallel(n_jobs=n_jobs, backend='threading')(delayed(process_pool)
+        (name, path) for name, path in studies.items())
 
 
 def sim_sub(img, s1, s2):
