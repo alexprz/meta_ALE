@@ -109,7 +109,8 @@ def extract_from_paths(path_dict, data=['coord', 'path'],
 
     Args:
         path_dict (dict): Dict which keys are study names and values
-            absolute paths (string).
+            are another dict which keys are map names ('z', 'con', 'se', 't')
+            and values are absolute paths (string) to these maps.
         data (list): Data to extract. 'coord' and 'path' available.
         threshold (float): value below threshold are ignored. Used for
             peak detection.
@@ -129,27 +130,28 @@ def extract_from_paths(path_dict, data=['coord', 'path'],
             return ds_dict
 
     # Computing a new dataset dictionary
-    def extract_pool(name, path):
+    def extract_pool(name, map_dict):
         """Extract activation for multiprocessing."""
-        print(f'Extracting {path}...')
+        print(f'Extracting {name}...')
 
         XYZ = None
         if 'coord' in data:
-            XYZ = get_activations(path, threshold)
+            XYZ = get_activations(map_dict['z'], threshold)
             if XYZ is None:
                 return
 
         if 'path' in data:
-            base, filename = ntpath.split(path)
-            file, ext = filename.split('.', 1)
+            # base, filename = ntpath.split(path)
+            # file, ext = filename.split('.', 1)
 
-            path_dict = {'z': path}
-            for map_type in ['t', 'con', 'se']:
-                file_path = f'{base}/{file}_{map_type}.{ext}'
-                if os.path.isfile(file_path):
-                    path_dict[map_type] = file_path
+            # path_dict = {'z': path}
+            # for map_type in ['t', 'con', 'se']:
+            #     file_path = f'{base}/{file}_{map_type}.{ext}'
+            #     if os.path.isfile(file_path):
+            #         path_dict[map_type] = file_path
 
-            return get_sub_dict(XYZ, path_dict)
+            # return get_sub_dict(XYZ, path_dict)
+            return get_sub_dict(XYZ, map_dict)
 
         if XYZ is not None:
             return get_sub_dict(XYZ, None)
@@ -158,7 +160,7 @@ def extract_from_paths(path_dict, data=['coord', 'path'],
 
     n_jobs = multiprocessing.cpu_count()
     res = Parallel(n_jobs=n_jobs, backend='threading')(
-        delayed(extract_pool)(name, path) for name, path in path_dict.items())
+        delayed(extract_pool)(name, maps) for name, maps in path_dict.items())
 
     # Removing potential None values
     res = list(filter(None, res))
@@ -258,21 +260,26 @@ def process(studies, o_dir, n_sub, s1, s2, rmdir=False,
         for i in range(1, n_sub+1):
             print(f'Simulating subject {i}...', end='\r')
             sub_img = sim_sub(z_img, s1, s2)
-            sub_dir = f'{o_study_path}sub-{str(i).zfill(len(str(n_sub)))}/'
-            os.makedirs(sub_dir, exist_ok=True)
-            sub_img.to_filename(f'{sub_dir}{filename}')
+            # sub_dir = f'{o_study_path}sub-{str(i).zfill(len(str(n_sub)))}/'
+            # os.makedirs(sub_dir, exist_ok=True)
+            # sub_img.to_filename(f'{sub_dir}{filename}')
             sub_imgs.append(sub_img)
 
         std_img = nilearn.image.math_img('np.std(imgs, axis=3)', imgs=sub_imgs)
+        del sub_imgs
         std_img.to_filename(f'{o_study_path}{file}_se.{ext}')
 
         con_img = nilearn.image.math_img('np.multiply(img1, img2)',
                                          img1=z_img, img2=std_img)
-        con_img.to_filename(f'{o_study_path}{file}_con.{ext}')
+        del z_img, std_img
 
-    n_jobs = multiprocessing.cpu_count()
+        con_img.to_filename(f'{o_study_path}{file}_con.{ext}')
+        del con_img
+
+    n_jobs = multiprocessing.cpu_count()//2
+    # print([(name, paths['z']) for name, paths in studies.items()])
     Parallel(n_jobs=n_jobs, backend='threading')(delayed(process_pool)
-        (name, path) for name, path in studies.items())
+        (name, paths['z']) for name, paths in studies.items())
 
 
 def sim_sub(img, s1, s2):

@@ -40,13 +40,41 @@ def retrieve_imgs(dir_path, filename):
     except ValueError:
         pass
 
-    path_dict = dict()
+    # Extract extension
+    # base, filename = ntpath.split(path)
+    file, ext = filename.split('.', 1)
+
+    paths = dict()
     for dir in Dir:
         name = os.path.basename(os.path.normpath(dir))  # Extract name of study
         path = os.path.abspath(dir)  # Turn into absolute paths
-        path_dict[name] = f'{path}/{filename}'
+        # paths[name] = f'{path}/{filename}'
+        paths[name] = {
+            'z': f'{path}/{filename}',
+            'con': f'{path}/{file}_con.{ext}',
+            'se': f'{path}/{file}_se.{ext}'
+        }
 
-    return path_dict
+        # Filter to keep only existing files
+        # paths[name] = dict(filter(os.path.isfile, paths.items()))
+        paths[name] = {k: v for
+                       k, v in paths[name].items() if os.path.isfile(v)}
+
+    # Remove empty dict values
+    paths = {k: v for k, v in paths.items() if v}
+        # for file_path in [f'{path}/{filename}',
+        #             f'{path}/{file}_con.{ext}',
+        #             f'{path}/{file}_se.{ext}']:
+
+            # if os.path.isfile(file_path):
+            #     paths[name][''] = file_path
+
+        # paths[name] = {
+        #     'z': f'{path}/{filename}',
+        #     'con': f'{path}/{file}_con.{ext}',
+        #     'se': f'{path}/{file}_se.{ext}'
+
+    return paths
 
 
 def run_ALE(ds_dict):
@@ -136,13 +164,13 @@ if __name__ == '__main__':
     # Parameters
     data_dir = 'data-narps/orig/'  # Data folder
     hyp_file = 'hypo1_unthresh.nii.gz'  # Hypothesis name
-    con_file = 'hypo1_unthresh_con.nii.gz'  # Hypothesis name
-    se_file = 'hypo1_unthresh_se.nii.gz'  # Hypothesis name
-    hyp_file_proc = 'hypo1_unthresh_resampled.nii.gz'  # Hypothesis name
+    # con_file = 'hypo1_unthresh_con.nii.gz'  # Hypothesis name
+    # se_file = 'hypo1_unthresh_se.nii.gz'  # Hypothesis name
+    # hyp_file_proc = 'hypo1_unthresh_resampled.nii.gz'  # Hypothesis name
     o_dir = 'data-narps/proc/'
 
     threshold = 1.96
-    tag = f'{hyp_file_proc}-thr-{threshold}'
+    tag = f'{hyp_file}-thr-{threshold}'
     load = False
     RS = 0
 
@@ -152,8 +180,11 @@ if __name__ == '__main__':
     # print(path_dict)
     # exit()
 
+    # print(path_dict)
+
     process(path_dict, o_dir=o_dir, n_sub=119, s1=10., s2=1.5, rmdir=True,
             ignore_if_exist=True, random_state=RS)
+    # exit()
 
     # for study in ['ADFZYYLQ_C88N', 'BPZDIIWY_VG39']:
     #     img_mean = nilearn.image.load_img(f'{o_dir}{study}/{con_file}')
@@ -168,6 +199,8 @@ if __name__ == '__main__':
     # exit()
 
     proc_path_dict = retrieve_imgs(o_dir, hyp_file)
+    # print(proc_path_dict)
+    # exit()
 
     # Extract data from files
     ds_dict = extract_from_paths(proc_path_dict, data=['path', 'coord'],
@@ -177,26 +210,26 @@ if __name__ == '__main__':
     # exit()
 
     # Perform meta analysis
-    # img_ale, img_p, img_z = run_ALE(ds_dict)
-    # img_t_MFX = run_MFX_GLM(ds_dict)
-    # img_t_FFX = run_FFX_GLM(ds_dict)
-    # img_t_RFX = run_RFX_GLM(ds_dict)
+    img_ale, img_p, img_z = run_ALE(ds_dict)
+    img_t_MFX = run_MFX_GLM(ds_dict)
+    img_t_FFX = run_FFX_GLM(ds_dict)
+    img_t_RFX = run_RFX_GLM(ds_dict)
     img_z_F = run_Fishers(ds_dict)
     img_z_S = run_Stouffers(ds_dict)
     img_z_WS = run_WeightedStouffers(ds_dict)
     # ds = nimare.dataset.Dataset(ds_dict)
     # img_t = nimare.meta.ibma.WeightedStouffers().fit(ds).get_map('t')
-    # img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
+    img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
 
-    # plotting.plot_stat_map(img_ale, title='ALE')
-    # plotting.plot_stat_map(img_p, title='p')
-    # plotting.plot_stat_map(img_z, title='z')
-    # plotting.plot_stat_map(img_ale_t, title='ALE thresholded')
-    # plotting.plot_stat_map(img_z_t, title='z thresholded')
-    # plotting.plot_stat_map(img_p_t, title='p thresholded')
-    # plotting.plot_stat_map(img_t_MFX, title='t MFX')
-    # plotting.plot_stat_map(img_t_FFX, title='t FFX')
-    # plotting.plot_stat_map(img_t_RFX, title='t RFX')
+    plotting.plot_stat_map(img_ale, title='ALE')
+    plotting.plot_stat_map(img_p, title='p')
+    plotting.plot_stat_map(img_z, title='z')
+    plotting.plot_stat_map(img_ale_t, title='ALE thresholded')
+    plotting.plot_stat_map(img_z_t, title='z thresholded')
+    plotting.plot_stat_map(img_p_t, title='p thresholded')
+    plotting.plot_stat_map(img_t_MFX, title='t MFX')
+    plotting.plot_stat_map(img_t_FFX, title='t FFX')
+    plotting.plot_stat_map(img_t_RFX, title='t RFX')
     plotting.plot_stat_map(img_z_F, title='z Fishers')
     plotting.plot_stat_map(img_z_S, title='z Stouffers')
     plotting.plot_stat_map(img_z_WS, title='z Weighted Stouffers')
