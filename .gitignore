@@ -8,3 +8,5 @@ nipy
 brain_mapping
 save
 !.git*
+*.ipynb
+resource
