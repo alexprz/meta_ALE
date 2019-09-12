@@ -1,4 +1,12 @@
 data-narps
 venv
-__pycache__
 .env
+nipy
+*_cache*
+*cache_*
+.*
+brain_mapping
+save
+!.git*
+*.ipynb
+resource
