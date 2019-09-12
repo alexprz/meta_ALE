@@ -1,5 +1,5 @@
 """Perform data extraction, run ALE and plot results."""
-from extract import extract_from_paths, process
+from extract import extract_from_paths, process, get_sub_dict
 import nimare
 from nimare.dataset import Dataset
 import matplotlib
@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 import copy
 import nilearn
+import pickle
 
 # Set backend for matplotlib
 load_dotenv()
@@ -17,6 +18,16 @@ if 'MPL_BACKEND' in os.environ:
     matplotlib.use(os.environ['MPL_BACKEND'])
 else:
     matplotlib.use('TkAgg')
+
+
+from meta_analysis import Maps
+from brain_mapping.tools import build_df_from_keyword, build_activity_map_from_pmid
+from brain_mapping.globals import template, gray_mask
+from nilearn import plotting
+import matplotlib
+matplotlib.use('MacOsx')
+from matplotlib import pyplot as plt
+import numpy as np
 
 
 def retrieve_imgs(dir_path, filename):
@@ -131,10 +142,26 @@ def retrieve_imgs(dir_path, filename):
 
 
 def run_meta(ds_dict, ibma, map_types):
-    ds = Dataset(ds_dict)
+    ds = Dataset(ds_dict, mask=gray_mask)
     res = ibma.fit(ds)
+    print(res.maps)
     maps = [res.get_map(map_type) for map_type in map_types]
     return tuple(maps)
+
+
+def threshold_imgs(img_list, threshold):
+    if not img_list:
+        return []
+
+    arr_list = [copy.copy(img.get_fdata()) for img in img_list]
+
+    for arr in arr_list:
+        arr[arr < threshold] = 0
+
+    aff = img_list[0].affine
+    res_list = [nib.Nifti1Image(arr, aff) for arr in arr_list]
+
+    return res_list
 
 
 def fdr_threshold(img_list, img_p, q=0.05):
@@ -155,6 +182,31 @@ def fdr_threshold(img_list, img_p, q=0.05):
 
 if __name__ == '__main__':
     # Parameters
+
+    keyword = 'prosopagnosia'
+    sigma = 2.
+
+    df = build_df_from_keyword(keyword)
+
+    maps = Maps(df, template=template, groupby_col='pmid')
+
+    # imgs = maps.to_img(sequence=True)
+    sub_dicts = []
+    for k in range(maps.n_m):
+        arr = maps.to_array(k)
+        # x, y, z = np.nonzero(arr)
+        x, y, z = np.nonzero(arr)
+        xyz = np.array((x, y, z, np.ones(x.shape[0])))
+        arr = np.dot(maps.affine, xyz)[:-1, :]
+        sub_dicts.append(get_sub_dict(arr, None))
+        # print(x)
+
+    ds_dict = {k: v for k, v in enumerate(sub_dicts)}
+
+    print(ds_dict)
+
+    # exit()
+
     data_dir = 'data-narps/orig/'  # Data folder
     hyp_file = 'hypo1_unthresh.nii.gz'  # Hypothesis name
     o_dir = 'data-narps/proc/'
@@ -164,11 +216,11 @@ if __name__ == '__main__':
     load = True
     RS = 0
 
-    # Retrieve image paths from data folder
-    path_dict = retrieve_imgs(data_dir, hyp_file)
+    # # Retrieve image paths from data folder
+    # path_dict = retrieve_imgs(data_dir, hyp_file)
 
-    process(path_dict, o_dir=o_dir, n_sub=119, s1=10., s2=1.5, rmdir=True,
-            ignore_if_exist=True, random_state=RS)
+    # process(path_dict, o_dir=o_dir, n_sub=119, s1=10., s2=1.5, rmdir=True,
+    #         ignore_if_exist=True, random_state=RS)
 
     # for study in ['ADFZYYLQ_C88N', 'BPZDIIWY_VG39']:
     #     img_mean = nilearn.image.load_img(f'{o_dir}{study}/{con_file}')
@@ -182,10 +234,12 @@ if __name__ == '__main__':
     #     plt.show()
 
     # Extract data from files
-    proc_path_dict = retrieve_imgs(o_dir, hyp_file)
-    ds_dict = extract_from_paths(proc_path_dict, data=['path', 'coord'],
-                                 threshold=threshold, tag=tag, load=load)
+    # proc_path_dict = retrieve_imgs(o_dir, hyp_file)
 
+    # ds_dict = extract_from_paths(proc_path_dict, data=['path', 'coord'],
+    #                              threshold=threshold, tag=tag, load=load)
+    # print(ds_dict)
+    # exit()
     # Perform meta analysis
     # img_ale, img_p, img_z = run_ALE(ds_dict)
     # img_t_MFX = run_MFX_GLM(ds_dict)
@@ -195,7 +249,12 @@ if __name__ == '__main__':
     # img_z_S = run_Stouffers(ds_dict)
     # img_z_WS = run_WeightedStouffers(ds_dict)
     img_ale, img_p, img_z = run_meta(ds_dict, nimare.meta.cbma.ale.ALE(), ['ale', 'p', 'z'])
-    img_t_MFX, = run_meta(ds_dict, nimare.meta.ibma.MFX_GLM(), ['t'])
+    img_kda, = run_meta(ds_dict, nimare.meta.cbma.mkda.KDA(), ['of'])
+    img_mkda, = run_meta(ds_dict, nimare.meta.cbma.mkda.MKDADensity(), ['of'])
+
+
+
+    # img_t_MFX, = run_meta(ds_dict, nimare.meta.ibma.MFX_GLM(), ['t'])
     # img_t_FFX, = run_meta(ds_dict, nimare.meta.ibma.FFX_GLM(), ['t'])
     # img_t_RFX, = run_meta(ds_dict, nimare.meta.ibma.RFX_GLM(), ['t'])
     # img_z_F, = run_meta(ds_dict, nimare.meta.ibma.Fishers(), ['z'])
@@ -203,6 +262,8 @@ if __name__ == '__main__':
     # img_z_WS, = run_meta(ds_dict, nimare.meta.ibma.WeightedStouffers(), ['z'])
 
     img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
+    img_kda_t, = threshold_imgs([img_kda], 1./4*np.max(img_kda.get_fdata()))
+    img_mkda_t, = threshold_imgs([img_mkda], 1./4*np.max(img_mkda.get_fdata()))
 
     # plotting.plot_stat_map(img_ale, title='ALE')
     # plotting.plot_stat_map(img_p, title='p')
@@ -221,10 +282,14 @@ if __name__ == '__main__':
         'ALE': img_ale,
         'p': img_p,
         'z': img_z,
-        'ALE thresholded': img_ale_t,
-        'p thresholded': img_p_t,
-        'z thresholded': img_z_t,
-        't MFX': img_t_MFX,
+        'ALE_thresholded': img_ale_t,
+        'p_thresholded': img_p_t,
+        'z_thresholded': img_z_t,
+        'KDA': img_kda,
+        'MKDA': img_mkda,
+        'KDA_thresholded': img_kda_t,
+        'MKDA_thresholded': img_mkda_t,
+        # 't MFX': img_t_MFX,
         # 't FFX': img_t_FFX,
         # 't RFX': img_t_RFX,
         # 'z Fishers': img_z_F,
@@ -232,7 +297,13 @@ if __name__ == '__main__':
         # 'z Weighted Stouffers': img_z_WS
     }
 
-    for name, img in meta_analysis.items():
-        plotting.plot_stat_map(img, title=name)
+    if not os.path.exists('save/models/'):
+        os.makedirs('save/models/')
 
-    plt.show()
+    for name, img in meta_analysis.items():
+        # plotting.plot_stat_map(img, title=name)
+
+        with open(f'save/models/{name}.pickle', 'wb') as file:
+            pickle.dump(img, file)
+
+    # plt.show()

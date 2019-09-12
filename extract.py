@@ -1,11 +1,16 @@
+"""Contain function for extracting coordinates from folders."""
 import os
-import nibabel as nib
+import shutil
 import numpy as np
 import nilearn
-from nilearn import masking, datasets, plotting, image
+from nilearn import masking, datasets, image
 from nipy.labs.statistical_mapping import get_3d_peaks
 import multiprocessing
 from joblib import Parallel, delayed
+import ntpath
+import nibabel as nib
+import re
+import scipy
 
 from tools import pickle_dump, pickle_load
 
@@ -15,128 +20,288 @@ template = datasets.load_mni152_template()
 gray_mask = masking.compute_gray_matter_mask(template)
 
 
-def get_sub_dict(X, Y, Z):
-    '''
-        Build sub dictionnary of a study using the
-        nimare structure
+def get_sub_dict(XYZ, path_dict):
+    """
+    Build sub dictionnary of a study using the nimare structure.
 
-        Args:
-            X (list): Store the X coordinates
-            Y (list): Store the Y coordinates
-            Z (list): Store the Z coordinates
+    Args:
+        XYZ (tuple): Size 3 tuple of list storing the X Y Z coordinates.
+        path_dict (dict): Dict which has map name ('t', 'z', 'con', 'se')
+            as keys and absolute path to the image as values.
 
-        Returns:
-            (dict): Dictionary storing the coordinates for a
-                single study using the Nimare structure.
-    '''
-    return {
+    Returns:
+        (dict): Dictionary storing the coordinates for a
+            single study using the Nimare structure.
+
+    """
+    d = {
         'contrasts': {
             '0': {
-                'coords':
-                    {
-                        'x': X,
-                        'y': Y,
-                        'z': Z,
-                        'space': 'MNI'
-                    },
-                'sample_sizes': 50
+                'metadata': {'sample_sizes': 119}
             }
         }
     }
 
-def get_activations(filepath, threshold):
-    '''
-        Given the path of a Nifti1Image storing a contrast,
-        retrieve the xyz activation coordinates.
+    if XYZ is not None:
+        d['contrasts']['0']['coords'] = {
+                    'x': XYZ[0],
+                    'y': XYZ[1],
+                    'z': XYZ[2],
+                    'space': 'MNI'
+                    }
+        d['contrasts']['0']['sample_sizes'] = 119
 
-        Args:
-            filepath (stirng): Path to a nibabel.Nifti1Image from which to
-                extract coordinates.
-            threshold (float): Same as the extract function
+    if path_dict is not None:
+        d['contrasts']['0']['images'] = path_dict
 
-        Returns:
-            (tuple): Size 3 tuple of lists storing respectively the X, Y and
-                Z coordinates
-    '''
+    return d
+
+
+def get_activations(path, threshold):
+    """
+    Retrieve the xyz activation coordinates from an image.
+
+    Args:
+        path (string or Nifti1Image): Path to or object of a
+            nibabel.Nifti1Image from which to extract coordinates.
+        threshold (float): Same as the extract_from_paths function.
+
+    Returns:
+        (tuple): Size 3 tuple of lists storing respectively the X, Y and
+            Z coordinates
+
+    """
     X, Y, Z = [], [], []
 
     try:
-        img = nilearn.image.load_img(filepath)
+        img = nilearn.image.load_img(path)
     except ValueError:  # File path not found
-        print(f'File {filepath} not found. Ignored.')
+        print(f'File {path} not found. Ignored.')
         return None
 
     if np.isnan(img.get_fdata()).any():
-        print(f'File {filepath} contains Nan. Ignored.')
+        print(f'Img {path} contains Nan. Ignored.')
         return None
 
     img = image.resample_to_img(img, template)
-    threshold = 1.96
 
     peaks = get_3d_peaks(img, mask=gray_mask, threshold=threshold)
+
+    if not peaks:
+        return X, Y, Z
 
     for peak in peaks:
         X.append(peak['pos'][0])
         Y.append(peak['pos'][1])
         Z.append(peak['pos'][2])
 
-
     del peaks
     return X, Y, Z
 
-def extract(dir_path, filename, threshold=0., load=True):
-    '''
-        Extracts coordinates from the data and put it in a
+
+def extract_from_paths(path_dict, data=['coord', 'path'],
+                       threshold=1.96, tag=None, load=True):
+    """
+    Extract data from given images.
+
+    Extracts data (coordinates, paths...) from the data and put it in a
         dictionnary using Nimare structure.
 
-        Args:
-            dir_path (str): Path to the folder containing the studies folders
-            filename (str): Name of the image to look for inside each study folder
-            threshold (float): float between 0 and 1 representing the percentile of
-                the non-zero values.
-            load (bool): If True, try to load a previously dumped dict if any.
-                If not or False, compute a new one.
+    Args:
+        path_dict (dict): Dict which keys are study names and values
+            are another dict which keys are map names ('z', 'con', 'se', 't')
+            and values are absolute paths (string) to these maps.
+        data (list): Data to extract. 'coord' and 'path' available.
+        threshold (float): value below threshold are ignored. Used for
+            peak detection.
+        tag (str): Name of the file to load/dump.
+        load (bool): If True, load a potential existing result.
+            If False or not found, compute again.
 
-        Returns:
-            (dict): Dictionnary storing the coordinates using the Nimare
-                structure.
-    '''
-    tag = f'{filename}-thr-{threshold}'
+    Returns:
+        (dict): Dictionnary storing the coordinates using the Nimare
+            structure.
 
-    # Loading previously computed dict if any
-    ds_dict = pickle_load(save_dir+tag, load=load)
-    if ds_dict is not None:
-        return ds_dict
+    """
+    if tag is not None:
+        # Loading previously computed dict if any
+        ds_dict = pickle_load(save_dir+tag, load=load)
+        if ds_dict is not None:
+            return ds_dict
 
     # Computing a new dataset dictionary
-    ds_dict = {}
+    def extract_pool(name, map_dict):
+        """Extract activation for multiprocessing."""
+        print(f'Extracting {name}...')
 
-    # List of folders contained in dir_path folder
-    dir_list = [f'{dir_path}{dir}' for dir in next(os.walk(dir_path))[1]]
-    try:
-        # On some OS the root dict is also in the list, must be removed
-        dir_list.remove(dir_path)
-    except ValueError:
-        pass
+        XYZ = None
+        if 'coord' in data:
+            XYZ = get_activations(map_dict['z'], threshold)
+            if XYZ is None:
+                return
 
-    def extract_pool(directory):
-        '''
-            Function used for multiprocessing
-        '''
-        print(f'Extracting {directory}...')
-        XYZ = get_activations(f'{directory}/{filename}', threshold)
-        if not XYZ is None:
-            return get_sub_dict(XYZ[0], XYZ[1], XYZ[2])
-        return None
+        if 'path' in data:
+            # base, filename = ntpath.split(path)
+            # file, ext = filename.split('.', 1)
+
+            # path_dict = {'z': path}
+            # for map_type in ['t', 'con', 'se']:
+            #     file_path = f'{base}/{file}_{map_type}.{ext}'
+            #     if os.path.isfile(file_path):
+            #         path_dict[map_type] = file_path
+
+            # return get_sub_dict(XYZ, path_dict)
+            return get_sub_dict(XYZ, map_dict)
+
+        if XYZ is not None:
+            return get_sub_dict(XYZ, None)
+
+        return
 
     n_jobs = multiprocessing.cpu_count()
-    res = Parallel(n_jobs=n_jobs, backend='threading')(delayed(extract_pool)(dir) for dir in dir_list)
+    res = Parallel(n_jobs=n_jobs, backend='threading')(
+        delayed(extract_pool)(name, maps) for name, maps in path_dict.items())
 
     # Removing potential None values
     res = list(filter(None, res))
     # Merging all dictionaries
     ds_dict = {k: v for k, v in enumerate(res)}
 
-    # Dumping
-    pickle_dump(ds_dict, save_dir+tag)
+    if tag is not None:
+        pickle_dump(ds_dict, save_dir+tag)  # Dumping
     return ds_dict
+
+
+# def process(Path, suffix='_resampled'):
+#     """
+#     Process images to resample them into MNI template.
+
+#     Args:
+#         Path (list): List of paths (string) of images.
+#         suffix (string): Suffix added to the original file. Note that the
+#             output file is stored in the same dir as the input one.
+
+#     """
+#     for path in Path:
+#         try:
+#             img = nilearn.image.load_img(path)
+#         except ValueError:  # File path not found
+#             print(f'File {path} not found. Ignored.')
+#             continue
+
+#         if np.isnan(img.get_fdata()).any():
+#             print(f'File {path} contains Nan. Ignored.')
+#             continue
+
+#         img = image.resample_to_img(img, template)
+#         var = nib.Nifti1Image(img.get_fdata(), img.affine)
+
+#         base, filename = ntpath.split(path)
+#         file, ext = filename.split('.', 1)
+
+#         print(f'Resampling {path}...')
+#         img.to_filename(f'{base}/{file}{suffix}.{ext}')
+#         var.to_filename(f'{base}/{file}_var.{ext}')
+
+def process(studies, o_dir, n_sub, s1, s2, rmdir=False,
+            ignore_if_exist=False, random_state=None):
+    """
+    Process data by simulating subjects from studies' avg contrasts.
+
+    Args:
+        studies (dict): Dict with studies' alphanum names as keys and
+            absolute path to studies' folder as values.
+        o_dir (string): Path to output directory in which to store
+            processed data.
+        n_sub (int): Number of subjects to simulate.
+        s1 (float): Standard deviation of the gaussian noise.
+        s2 (float): Standard deviation of the gaussian kernel.
+        rmdir (bool, optional): Whether to delete existing output directory
+            before writing process data.
+        ignore_if_exist (bool, optional): Whether to ignore this process
+            if the output directory exists.
+
+    """
+    np.random.seed(random_state)
+    if ignore_if_exist and os.path.exists(o_dir):
+        print(f'Dir {o_dir} exists. Process ignored.')
+        return
+
+    if rmdir and os.path.exists(o_dir):
+        shutil.rmtree(o_dir)
+
+    o_dir = os.path.join(o_dir, '')  # Adds trailing slash if not already
+
+    # for study_name, path in studies.items():
+    def process_pool(study_name, path):
+        print(f'Processing {study_name}...')
+        try:
+            z_img = nilearn.image.load_img(path)
+        except ValueError:  # File path not found
+            print(f'File {path} not found. Ignored.')
+            return
+
+        if np.isnan(z_img.get_fdata()).any():
+            print(f'Image {path} contains Nan. Ignored.')
+            return
+
+        if not re.match(r'^\w+$', study_name):
+            raise ValueError('Study {study_name} contains invalid caracters.')
+        o_study_path = f'{o_dir}{study_name}/'
+        os.makedirs(o_study_path, exist_ok=True)
+
+        _, filename = ntpath.split(path)
+        file, ext = filename.split('.', 1)
+
+        z_img = image.resample_to_img(z_img, template)
+        z_img.to_filename(f'{o_study_path}{file}.{ext}')
+
+        sub_imgs = []
+        for i in range(1, n_sub+1):
+            print(f'Simulating subject {i}...', end='\r')
+            sub_img = sim_sub(z_img, s1, s2)
+            # sub_dir = f'{o_study_path}sub-{str(i).zfill(len(str(n_sub)))}/'
+            # os.makedirs(sub_dir, exist_ok=True)
+            # sub_img.to_filename(f'{sub_dir}{filename}')
+            sub_imgs.append(sub_img)
+
+        std_img = nilearn.image.math_img('np.std(imgs, axis=3)', imgs=sub_imgs)
+        del sub_imgs
+        std_img.to_filename(f'{o_study_path}{file}_se.{ext}')
+
+        con_img = nilearn.image.math_img('np.multiply(img1, img2)',
+                                         img1=z_img, img2=std_img)
+        del z_img, std_img
+
+        con_img.to_filename(f'{o_study_path}{file}_con.{ext}')
+        del con_img
+
+    n_jobs = multiprocessing.cpu_count()//2
+    # print([(name, paths['z']) for name, paths in studies.items()])
+    Parallel(n_jobs=n_jobs, backend='threading')(delayed(process_pool)
+        (name, paths['z']) for name, paths in studies.items())
+
+
+def sim_sub(img, s1, s2):
+    """
+    Simulate a subject's contrast from an average map.
+
+    Generate random gaussian noise of the shape of the given image, convolve
+    this noise with a gaussian kernel and add the result to the given image.
+
+    Args:
+        img (nibabel.Nifti1Image): Base image.
+        s1 (float): Standard deviation of the gaussian noise.
+        s2 (float): Standard deviation of the gaussian kernel applied to the
+            generated noise.
+
+    Returns:
+        (nibabel.Nifti1Image): Noised image.
+
+    """
+    data = img.get_fdata()
+    noise = np.random.normal(scale=s1, size=data.shape)
+    noise = scipy.ndimage.gaussian_filter(noise, s2)
+    noise = np.ma.masked_array(noise, np.logical_not(gray_mask.get_fdata()))
+
+    return nib.Nifti1Image(data+noise, img.affine)
