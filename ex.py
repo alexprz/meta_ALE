@@ -25,7 +25,7 @@ from brain_mapping.tools import build_df_from_keyword, build_activity_map_from_p
 from brain_mapping.globals import template, gray_mask
 from nilearn import plotting
 import matplotlib
-matplotlib.use('MacOsx')
+# matplotlib.use('MacOsx')
 from matplotlib import pyplot as plt
 import numpy as np
 
@@ -148,6 +148,10 @@ def run_meta(ds_dict, ibma, map_types):
     maps = [res.get_map(map_type) for map_type in map_types]
     return tuple(maps)
 
+def run_meta_complete(ds_dict, ibma):
+    ds = Dataset(ds_dict, mask=gray_mask)
+    return ibma.fit(ds)
+
 
 def threshold_imgs(img_list, threshold):
     if not img_list:
@@ -190,6 +194,8 @@ if __name__ == '__main__':
 
     maps = Maps(df, template=template, groupby_col='pmid')
 
+    # print(maps.n_m)
+    # exit()
     # imgs = maps.to_img(sequence=True)
     sub_dicts = []
     for k in range(maps.n_m):
@@ -248,9 +254,9 @@ if __name__ == '__main__':
     # img_z_F = run_Fishers(ds_dict)
     # img_z_S = run_Stouffers(ds_dict)
     # img_z_WS = run_WeightedStouffers(ds_dict)
-    img_ale, img_p, img_z = run_meta(ds_dict, nimare.meta.cbma.ale.ALE(), ['ale', 'p', 'z'])
-    img_kda, = run_meta(ds_dict, nimare.meta.cbma.mkda.KDA(), ['of'])
-    img_mkda, = run_meta(ds_dict, nimare.meta.cbma.mkda.MKDADensity(), ['of'])
+    # img_ale, img_p, img_z = run_meta(ds_dict, nimare.meta.cbma.ale.ALE(), ['ale', 'p', 'z'])
+    # img_kda, = run_meta(ds_dict, nimare.meta.cbma.mkda.KDA(), ['of'])
+    # img_mkda, = run_meta(ds_dict, nimare.meta.cbma.mkda.MKDADensity(), ['of'])
 
 
 
@@ -261,9 +267,9 @@ if __name__ == '__main__':
     # img_z_S, = run_meta(ds_dict, nimare.meta.ibma.Stouffers(), ['z'])
     # img_z_WS, = run_meta(ds_dict, nimare.meta.ibma.WeightedStouffers(), ['z'])
 
-    img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
-    img_kda_t, = threshold_imgs([img_kda], 1./4*np.max(img_kda.get_fdata()))
-    img_mkda_t, = threshold_imgs([img_mkda], 1./4*np.max(img_mkda.get_fdata()))
+    # img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
+    # img_kda_t, = threshold_imgs([img_kda], 1./4*np.max(img_kda.get_fdata()))
+    # img_mkda_t, = threshold_imgs([img_mkda], 1./4*np.max(img_mkda.get_fdata()))
 
     # plotting.plot_stat_map(img_ale, title='ALE')
     # plotting.plot_stat_map(img_p, title='p')
@@ -278,32 +284,46 @@ if __name__ == '__main__':
     # plotting.plot_stat_map(img_z_S, title='z Stouffers')
     # plotting.plot_stat_map(img_z_WS, title='z Weighted Stouffers')
 
-    meta_analysis = {
-        'ALE': img_ale,
-        'p': img_p,
-        'z': img_z,
-        'ALE_thresholded': img_ale_t,
-        'p_thresholded': img_p_t,
-        'z_thresholded': img_z_t,
-        'KDA': img_kda,
-        'MKDA': img_mkda,
-        'KDA_thresholded': img_kda_t,
-        'MKDA_thresholded': img_mkda_t,
-        # 't MFX': img_t_MFX,
-        # 't FFX': img_t_FFX,
-        # 't RFX': img_t_RFX,
-        # 'z Fishers': img_z_F,
-        # 'z Stouffers': img_z_S,
-        # 'z Weighted Stouffers': img_z_WS
+    # meta_analysis = {
+    #     'ALE': img_ale,
+    #     'p': img_p,
+    #     'z': img_z,
+    #     'ALE_thresholded': img_ale_t,
+    #     'p_thresholded': img_p_t,
+    #     'z_thresholded': img_z_t,
+    #     'KDA': img_kda,
+    #     'MKDA': img_mkda,
+    #     'KDA_thresholded': img_kda_t,
+    #     'MKDA_thresholded': img_mkda_t,
+    #     # 't MFX': img_t_MFX,
+    #     # 't FFX': img_t_FFX,
+    #     # 't RFX': img_t_RFX,
+    #     # 'z Fishers': img_z_F,
+    #     # 'z Stouffers': img_z_S,
+    #     # 'z Weighted Stouffers': img_z_WS
+    # }
+
+    res_ale = run_meta_complete(ds_dict, nimare.meta.cbma.ale.ALE())
+    res_kda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.KDA())
+    res_mkda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.MKDADensity())
+
+    # img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
+    # img_kda_t, = threshold_imgs([img_kda], 1./4*np.max(img_kda.get_fdata()))
+    # img_mkda_t, = threshold_imgs([img_mkda], 1./4*np.max(img_mkda.get_fdata()))
+
+    meta_analysis_res_obj = {
+        'ALE': res_ale,
+        'KDA': res_kda,
+        'MKDA': res_mkda,
     }
 
-    if not os.path.exists('save/models/'):
-        os.makedirs('save/models/')
+    if not os.path.exists('save/res_meta/'):
+        os.makedirs('save/res_meta/')
 
-    for name, img in meta_analysis.items():
+    for name, img in meta_analysis_res_obj.items():
         # plotting.plot_stat_map(img, title=name)
 
-        with open(f'save/models/{name}.pickle', 'wb') as file:
+        with open(f'save/res_meta/{name}', 'wb') as file:
             pickle.dump(img, file)
 
     # plt.show()
