@@ -150,7 +150,7 @@ def run_meta(ds_dict, ibma, map_types):
 
 def run_meta_complete(ds_dict, ibma):
     ds = Dataset(ds_dict, mask=gray_mask)
-    return ibma.fit(ds)
+    return ibma, ibma.fit(ds)
 
 
 def threshold_imgs(img_list, threshold):
@@ -303,18 +303,21 @@ if __name__ == '__main__':
     #     # 'z Weighted Stouffers': img_z_WS
     # }
 
-    res_ale = run_meta_complete(ds_dict, nimare.meta.cbma.ale.ALE())
-    res_kda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.KDA())
-    res_mkda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.MKDADensity())
+    obj_ale, res_ale = run_meta_complete(ds_dict, nimare.meta.cbma.ale.ALE())
+    obj_kda, res_kda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.KDA())
+    obj_mkda, res_mkda = run_meta_complete(ds_dict, nimare.meta.cbma.mkda.MKDADensity())
 
     # img_ale_t, img_p_t, img_z_t = fdr_threshold([img_ale, img_p, img_z], img_p)
     # img_kda_t, = threshold_imgs([img_kda], 1./4*np.max(img_kda.get_fdata()))
     # img_mkda_t, = threshold_imgs([img_mkda], 1./4*np.max(img_mkda.get_fdata()))
 
     meta_analysis_res_obj = {
-        'ALE': res_ale,
-        'KDA': res_kda,
-        'MKDA': res_mkda,
+        'ALE_res': res_ale,
+        'KDA_res': res_kda,
+        'MKDA_res': res_mkda,
+        'ALE_obj': obj_ale,
+        'KDA_obj': obj_kda,
+        'MKDA_obj': obj_mkda,
     }
 
     if not os.path.exists('save/res_meta/'):
