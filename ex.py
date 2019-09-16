@@ -142,14 +142,19 @@ def retrieve_imgs(dir_path, filename):
 
 
 def run_meta(ds_dict, ibma, map_types):
-    ds = Dataset(ds_dict, mask=gray_mask)
+    # ds = Dataset(ds_dict, mask=gray_mask)
+    ds = Dataset(ds_dict)
+    assert(ds.masker is not None)
     res = ibma.fit(ds)
     print(res.maps)
     maps = [res.get_map(map_type) for map_type in map_types]
     return tuple(maps)
 
 def run_meta_complete(ds_dict, ibma):
-    ds = Dataset(ds_dict, mask=gray_mask)
+    # ds = Dataset(ds_dict, mask=gray_mask)
+    ds = Dataset(ds_dict)
+    print(ds.masker)
+    assert(ds.masker is not None)
     return ibma, ibma.fit(ds)
 
 
@@ -187,7 +192,7 @@ def fdr_threshold(img_list, img_p, q=0.05):
 if __name__ == '__main__':
     # Parameters
 
-    keyword = 'prosopagnosia'
+    keyword = 'language'
     sigma = 2.
 
     df = build_df_from_keyword(keyword)
@@ -319,6 +324,9 @@ if __name__ == '__main__':
         'KDA_obj': obj_kda,
         'MKDA_obj': obj_mkda,
     }
+
+    print(obj_kda.mask)
+    assert(obj_kda.mask is not None)
 
     if not os.path.exists('save/res_meta/'):
         os.makedirs('save/res_meta/')
