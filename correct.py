@@ -18,6 +18,8 @@ path_obj = os.path.abspath('save/res_meta/KDA_obj')
 path_t = os.path.abspath('save/res_meta/KDA_t')
 path_p = os.path.abspath('save/res_meta/KDA_p')
 
+q=0.05
+
 with open(path_res, 'rb') as file:
     res = pickle.load(file)
 
